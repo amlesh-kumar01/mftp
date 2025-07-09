@@ -1,0 +1,91 @@
+name: Scheduled MFTP Scraper
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'  # Every 10 minutes
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create config directories
+        run: |
+          mkdir -p mftp_config
+          mkdir -p doctor_config
+
+      - name: Create MFTP config files from secrets
+        run: |
+          echo '${{ secrets.ENV_PY }}' > mftp_config/env.py
+          echo '${{ secrets.TOKEN_JSON }}' > mftp_config/token.json
+          echo '${{ secrets.CREDENTIALS_JSON }}' > mftp_config/credentials.json
+          echo '${{ secrets.MAIL_SEND_TOKEN_JSON }}' > mftp_config/mail_send_token.json
+          echo '${{ secrets.MAIL_SEND_CREDS_JSON }}' > mftp_config/mail_send_creds.json
+          echo '${{ secrets.COMPANIES_JSON }}' > mftp_config/companies.json
+
+      - name: Create session file from secrets
+        run: |
+          # Create .session file if it exists in secrets
+          if [ ! -z "${{ secrets.SESSION_FILE }}" ]; then
+            echo '${{ secrets.SESSION_FILE }}' > mftp_config/.session
+          else
+            # Create empty session file if not provided
+            touch mftp_config/.session
+          fi
+
+      - name: Create Doctor config files from secrets
+        run: |
+          echo '${{ secrets.ENV_PY }}' > doctor_config/env.py
+
+      - name: Create .env file
+        run: |
+          cat > .env << EOF
+          MFTP_CONFIG=./mftp_config
+          MFTP_MODE=--smtp --cron
+          DOCTOR_CONFIG=./doctor_config
+          DOCTOR_MODE=
+          MONGO_ROOT_USERNAME=mftp
+          MONGO_ROOT_PASSWORD=ptfm
+          MONGO_DATABASE=mftp
+          MONGO_PORT=27017
+          EOF
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start MongoDB first
+        run: |
+          docker compose up -d db
+          # Wait for MongoDB to be ready
+          sleep 30
+
+      - name: Check MongoDB health
+        run: |
+          docker compose ps
+          docker compose logs db
+
+      - name: Run MFTP scraper (one-time execution)
+        run: |
+          # Run MFTP container once and exit
+          docker compose run --rm mftp
+
+      - name: Run MFTP Doctor (if needed)
+        run: |
+          # Run doctor if configured
+          if [ ! -z "${{ secrets.DOCTOR_MODE }}" ]; then
+            docker compose run --rm mftp-doctor
+          fi
+
+      - name: Show logs for debugging
+        if: failure()
+        run: |
+          docker compose logs
+          
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose down -v
