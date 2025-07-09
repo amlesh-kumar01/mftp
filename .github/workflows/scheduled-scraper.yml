@@ -20,26 +20,24 @@ jobs:
 
       - name: Create MFTP config files from secrets
         run: |
-          echo '${{ secrets.ENV_PY }}' > mftp_config/env.py
-          echo '${{ secrets.TOKEN_JSON }}' > mftp_config/token.json
-          echo '${{ secrets.CREDENTIALS_JSON }}' > mftp_config/credentials.json
-          echo '${{ secrets.MAIL_SEND_TOKEN_JSON }}' > mftp_config/mail_send_token.json
-          echo '${{ secrets.MAIL_SEND_CREDS_JSON }}' > mftp_config/mail_send_creds.json
-          echo '${{ secrets.COMPANIES_JSON }}' > mftp_config/companies.json
+          printf "%s" "${{ secrets.ENV_PY }}" > mftp_config/env.py
+          printf "%s" "${{ secrets.TOKEN_JSON }}" > mftp_config/token.json
+          printf "%s" "${{ secrets.CREDENTIALS_JSON }}" > mftp_config/credentials.json
+          printf "%s" "${{ secrets.MAIL_SEND_TOKEN_JSON }}" > mftp_config/mail_send_token.json
+          printf "%s" "${{ secrets.MAIL_SEND_CREDS_JSON }}" > mftp_config/mail_send_creds.json
+          printf "%s" "${{ secrets.COMPANIES_JSON }}" > mftp_config/companies.json
 
       - name: Create session file from secrets
         run: |
-          # Create .session file if it exists in secrets
           if [ ! -z "${{ secrets.SESSION_FILE }}" ]; then
-            echo '${{ secrets.SESSION_FILE }}' > mftp_config/.session
+            printf "%s" "${{ secrets.SESSION_FILE }}" > mftp_config/.session
           else
-            # Create empty session file if not provided
             touch mftp_config/.session
           fi
 
       - name: Create Doctor config files from secrets
         run: |
-          echo '${{ secrets.ENV_PY }}' > doctor_config/env.py
+          printf "%s" "${{ secrets.ENV_PY }}" > doctor_config/env.py
 
       - name: Create .env file
         run: |
@@ -60,7 +58,6 @@ jobs:
       - name: Start MongoDB first
         run: |
           docker compose up -d db
-          # Wait for MongoDB to be ready
           sleep 30
 
       - name: Check MongoDB health
@@ -70,15 +67,7 @@ jobs:
 
       - name: Run MFTP scraper (one-time execution)
         run: |
-          # Run MFTP container once and exit
           docker compose run --rm mftp
-
-      - name: Run MFTP Doctor (if needed)
-        run: |
-          # Run doctor if configured
-          if [ ! -z "${{ secrets.DOCTOR_MODE }}" ]; then
-            docker compose run --rm mftp-doctor
-          fi
 
       - name: Show logs for debugging
         if: failure()
