@@ -54,7 +54,12 @@ def fetch(session, headers, ssoToken):
 
     fetched_companies = []
     for row in root.findall("row"):
-        jd_args = row.find("cell[4]").text.split("'")[5].split('"')
+        # Safely get cell[4] for jd_args
+        cell_4 = row.find("cell[4]")
+        if cell_4 is None or cell_4.text is None:
+            continue  # Skip this row if critical data is missing
+        
+        jd_args = cell_4.text.split("'")[5].split('"')
         jnf_id, com_id, year = jd_args[1], jd_args[3], jd_args[5]
 
         # Links
@@ -66,21 +71,63 @@ def fetch(session, headers, ssoToken):
         additional_jd = f"https://erp.iitkgp.ac.in/TrainingPlacementSSO/JnfMoreDet.jsp?mode=jnfMoreDet&rollno={ROLL_NUMBER}&year={year}&com_id={com_id}&jnf_id={jnf_id}"
         form_additional_details = f"https://erp.iitkgp.ac.in/TrainingPlacementSSO/AdmFilePDF.htm?type=JNF&year={year}&jnf_id={jnf_id}&com_id={com_id}"
 
+        # Get text values safely for ALL critical fields
+        cell_1 = row.find("cell[1]")
+        cell_4_role = row.find("cell[4]")
+        cell_9 = row.find("cell[9]")
+        cell_10 = row.find("cell[10]")  
+        cell_11 = row.find("cell[11]")
+        cell_12 = row.find("cell[12]")
+        
+        # Safe text extraction with None checks
+        def safe_text(cell):
+            return cell.text if cell is not None and cell.text is not None else ""
+        
+        # Extract name safely
+        name_text = safe_text(cell_1)
+        if ">" in name_text and "<" in name_text:
+            try:
+                name = name_text.split(">")[1].split("<")[0].strip()
+            except (IndexError, AttributeError):
+                name = name_text.strip() if name_text else "Unknown"
+        else:
+            name = name_text.strip() if name_text else "Unknown"
+        
+        # Extract role safely
+        role_text = safe_text(cell_4_role)
+        if "'" in role_text:
+            try:
+                role_parts = role_text.split("'")
+                if len(role_parts) > 1:
+                    role = role_parts[1].strip()
+                else:
+                    role = "Unknown"
+            except (IndexError, AttributeError):
+                role = "Unknown"
+        else:
+            role = "Unknown"
+        
+        # Extract other fields safely
+        app_status_text = safe_text(cell_9)
+        start_date_text = safe_text(cell_10)
+        end_date_text = safe_text(cell_11)
+        interview_date_text = safe_text(cell_12)
+
         company_info = {
-            "Name": row.find("cell[1]").text.split(">")[1].split("<")[0].strip(),
+            "Name": name,
             "Company_Details": company_details,
             "Company_Additional_Details": company_additional_details,
             "PPT": ppt,
-            "Role": row.find("cell[4]").text.split("'")[1].strip(),
+            "Role": role,
             "Job_Description": jd,
             "Apply_Link_CV": apply_link_cv,
             "Additional_Job_Description": additional_jd,
             "CTC": get_ctc_with_currency(session, headers, additional_jd),
             "Form_Additional_Details": form_additional_details,
-            "Application_Status": row.find("cell[9]").text.strip() if row.find("cell[9]").text.strip() else "N",
-            "Start_Date": row.find("cell[10]").text.strip(),
-            "End_Date": row.find("cell[11]").text.strip(),
-            "Interview_Date": row.find("cell[12]").text.strip() if row.find("cell[12]").text.strip() else None,
+            "Application_Status": app_status_text.strip() if app_status_text and app_status_text.strip() else "N",
+            "Start_Date": start_date_text.strip() if start_date_text and start_date_text.strip() else "",
+            "End_Date": end_date_text.strip() if end_date_text and end_date_text.strip() else "",
+            "Interview_Date": interview_date_text.strip() if interview_date_text and interview_date_text.strip() else None,
         }
         
         fetched_companies.append(company_info)
@@ -149,15 +196,26 @@ def parse_link(session, link):
 
 
 def get_ctc_with_currency(session, headers, jd_url):
-    jd_response = session.get(jd_url, headers=headers)
-    html_content = jd_response.text.strip()
-    soup = bs(html_content, "html.parser")
+    try:
+        jd_response = session.get(jd_url, headers=headers)
+        html_content = jd_response.text.strip()
+        soup = bs(html_content, "html.parser")
 
-    row = soup.find_all("tr")[-1]
-    column = row.find_all("td")[-1]
-    ctc = column.text
-
-    return ctc
+        rows = soup.find_all("tr")
+        if not rows:
+            return "N/A"
+        
+        row = rows[-1]
+        columns = row.find_all("td")
+        if not columns:
+            return "N/A"
+        
+        column = columns[-1]
+        ctc = column.text if column.text else "N/A"
+        return ctc
+    except Exception as e:
+        logging.error(f"Error fetching CTC: {str(e)}")
+        return "N/A"
 
 
 def open_not_applied(company):
