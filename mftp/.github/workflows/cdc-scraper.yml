@@ -1,0 +1,90 @@
+name: CDC Notice Scraper
+
+on:
+  schedule:
+    # Run every 10 minutes
+    - cron: '*/10 * * * *'
+  workflow_dispatch:  # Allow manual trigger
+  push:
+    branches: [ main, master ]  # Test on push
+
+env:
+  MFTP_CONFIG: ./mftp_config
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Verify mftp_config files exist
+      run: |
+        echo "Checking mftp_config directory contents..."
+        ls -la mftp_config/ || echo "mftp_config directory not found"
+        
+        # Check if env.py exists
+        if [ -f "mftp_config/env.py" ]; then
+          echo "✅ env.py found"
+        else
+          echo "❌ env.py not found - please ensure mftp_config/env.py exists in your repository"
+          exit 1
+        fi
+        
+        # Check if session directory exists, create if not
+        mkdir -p mftp_config/.session
+        
+        # Check and create missing credential files if needed
+        [ ! -f "mftp_config/credentials.json" ] && echo '{}' > mftp_config/credentials.json
+        [ ! -f "mftp_config/token.json" ] && echo '{}' > mftp_config/token.json
+        [ ! -f "mftp_config/mail_send_creds.json" ] && echo '{}' > mftp_config/mail_send_creds.json
+        [ ! -f "mftp_config/mail_send_token.json" ] && echo '{}' > mftp_config/mail_send_token.json
+        [ ! -f "mftp_config/companies.json" ] && echo '[]' > mftp_config/companies.json
+        
+        echo "📁 Final mftp_config structure:"
+        ls -la mftp_config/
+    
+    - name: Create .env file for docker-compose
+      run: |
+        cat > .env << 'EOF'
+        MFTP_CONFIG=./mftp_config
+        MFTP_MODE=python mftp.py --cron --smtp
+        MONGO_ROOT_USERNAME=mftp
+        MONGO_ROOT_PASSWORD=ptfm
+        MONGO_DATABASE=mftp
+        MONGO_PORT=27017
+        EOF
+    
+    - name: Build and run with Docker Compose
+      run: |
+        echo "Starting Docker Compose..."
+        docker-compose --env-file .env up --build --abort-on-container-exit
+    
+    - name: Show container logs
+      if: always()
+      run: |
+        echo "=== MFTP Container Logs ==="
+        docker-compose logs mftp || echo "No MFTP logs available"
+        echo "=== DB Container Logs ==="
+        docker-compose logs db || echo "No DB logs available"
+    
+    - name: Cleanup
+      if: always()
+      run: |
+        docker-compose down --volumes --remove-orphans || true
+        docker system prune -f || true
+    
+    - name: Upload logs as artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: scraper-logs-${{ github.run_number }}
+        path: |
+          mftp_config/.session/
+          *.log
+        retention-days: 7
